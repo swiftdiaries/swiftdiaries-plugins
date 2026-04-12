@@ -1,0 +1,16 @@
+{
+  "name": "swiftdiaries-plugins",
+  "owner": {
+    "name": "Adhita Selvaraj"
+  },
+  "metadata": {
+    "description": "Personal Claude Code plugins for development workflows"
+  },
+  "plugins": [
+    {
+      "name": "swiftdiaries",
+      "source": "./swiftdiaries",
+      "description": "Beads-driven dev loops, plan execution, and task orchestration for ghostfin and personal projects"
+    }
+  ]
+}
