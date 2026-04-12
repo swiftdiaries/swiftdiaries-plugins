@@ -1,0 +1,8 @@
+{
+  "name": "swiftdiaries",
+  "description": "Personal development workflows — beads-driven dev loops, plan execution, and task orchestration",
+  "version": "1.0.0",
+  "author": {
+    "name": "Adhita Selvaraj"
+  }
+}
