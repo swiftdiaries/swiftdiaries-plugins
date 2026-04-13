@@ -1,0 +1,11 @@
+{
+  "name": "swiftdiaries",
+  "version": "1.0.0",
+  "description": "Personal development workflows — beads-driven dev loops, plan execution, and task orchestration",
+  "author": {
+    "name": "Adhita Selvaraj"
+  },
+  "repository": "https://github.com/swiftdiaries/swiftdiaries-plugins",
+  "license": "Apache-2.0",
+  "keywords": ["beads", "dev-loop", "plan-execution", "tdd", "superpowers"]
+}

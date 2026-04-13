@@ -1,6 +1,7 @@
 ---
 name: execute-dev-loop
 description: Execute an implementation plan end-to-end using beads task tracking and superpowers development workflows. Creates an epic and tasks from plan sections, drives them to completion through TDD, parallel subagents, and code review. Use whenever the user references a plan file from docs/superpowers/plans/, says "execute the plan", "work the plan", "run the dev loop", "pick up plan tasks", "resume the plan", "run the pipeline", "dev loop", or wants to drive any implementation plan to completion. Also use when the user says "bd ready" and picks up tasks that reference a plan — this skill governs how those tasks get implemented.
+license: Apache-2.0
 ---
 
 # Execute Dev Loop
@@ -9,7 +10,7 @@ Drive an implementation plan to completion through a structured pipeline: **inge
 
 **Announce at start:** "Using execute-dev-loop to drive [plan name] to completion."
 
-**This is a rigid skill.** Follow each phase exactly. The discipline of the pipeline is the point.
+**This is a rigid skill.** Follow each phase exactly.
 
 ## Prerequisites
 
@@ -60,8 +61,6 @@ Check whether tasks in the plan include TDD steps (test commands, expected test 
 
 **If all code tasks already have TDD:** Continue to Step 4.
 
-This gate ensures every plan that enters the pipeline has testable tasks. Writing tests is not optional — if the plan doesn't specify them, fix the plan first.
-
 ### Step 4: Create Epic
 
 ```bash
@@ -98,8 +97,6 @@ bd dep add <downstream-task> <upstream-task>
 ```
 
 ### Step 6: Update Plan File (CRITICAL)
-
-This step is mandatory. The plan file is the persistent source of truth.
 
 Add a `## Pipeline Tracking` section immediately after the plan's title/header block (before the first `---` or `## File Map`):
 
@@ -266,16 +263,6 @@ This skill orchestrates these superpowers skills in order:
 | Phase 2, Step 4 (per task) | `superpowers:test-driven-development` | TDD when plan requires it |
 | Phase 2, Step 5 | `superpowers:requesting-code-review` | Review against spec |
 | Phase 3, Step 4 | `superpowers:finishing-a-development-branch` | Merge/PR/keep decision |
-
-## Key Rules
-
-1. **One plan = one epic = one worktree.** Never mix plans.
-2. **Update the plan file at every stage transition.** Creation, task completion, and plan completion all require plan file updates. This is non-negotiable.
-3. **Faithfully represent the plan.** Task descriptions capture the plan's full intent — files, TDD requirements, verification steps, code snippets. Don't summarize away detail.
-4. **No plan enters the pipeline without TDD.** If the plan lacks test specifications, rewrite it with `superpowers:writing-plans` before creating tasks.
-5. **Parallelize independent tasks.** Group tasks without shared files for subagent-driven-development.
-6. **Always use opus model for subagents.**
-7. **The plan file is the source of truth.** Anyone reading the plan file should know exactly where the pipeline stands.
 
 ## Common Mistakes
 
