@@ -9,7 +9,7 @@
   "plugins": [
     {
       "name": "swiftdiaries",
-      "source": "./swiftdiaries",
+      "source": "./",
       "description": "Beads-driven dev loops, plan execution, and task orchestration for ghostfin and personal projects"
     }
   ]
