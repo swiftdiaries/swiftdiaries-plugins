@@ -28,11 +28,11 @@ Read the plan file. Look for a `## Pipeline Tracking` section near the top.
 
 **If tracking section found:** Tasks already exist. Skip to Phase 2.
 
-**If no tracking section but tasks might exist:** Search beads for tasks referencing this plan:
+**If no tracking section but tasks might exist:** Search beads for the epic whose description references this plan. `bd search` matches titles by default; use `--desc-contains` to match the plan path stored in the epic's description:
 ```bash
-bd search "<plan-filename>"
+bd search --desc-contains="<plan-filename>" --type=epic
 ```
-If tasks are found, reconstruct the tracking section from beads state, update the plan file, then skip to Phase 2.
+If an epic is found, run `bd children <epic-id>` to enumerate tasks, reconstruct the tracking section in the plan file, then skip to Phase 2.
 
 **If neither:** Continue with full ingestion.
 
@@ -64,12 +64,11 @@ Check whether tasks in the plan include TDD steps (test commands, expected test 
 ### Step 4: Create Epic
 
 ```bash
-bd create --title="<plan-title>" --type=feature --priority=2 \
-  --description="Execution tracking for <plan-file-path>" \
-  --notes="Plan: <plan-file-path>"
+bd create "<plan-title>" --type=epic \
+  --description="Execution tracking for <plan-file-path>"
 ```
 
-Save the epic ID (e.g., `ghostfin-abc`).
+Save the epic ID (e.g., `ghostfin-abc`). The plan path in `--description` is what `bd search "<plan-filename>"` will match on resume (Phase 1, Step 1).
 
 ### Step 5: Create Tasks
 
@@ -83,18 +82,35 @@ Each task must faithfully represent the plan section — capture:
 - Verification commands (build, lint, type-check)
 
 ```bash
-bd create \
-  --title="<task-title>" \
-  --description="<faithful-description-from-plan>" \
-  --type=task \
-  --priority=2 \
-  --notes="Plan: <plan-file-path> | Task section: Task <N> | Epic: <epic-id>"
+bd create "<task-title>" \
+  --parent=<epic-id> \
+  --skills="superpowers:subagent-driven-development" \
+  --description="<faithful-description-from-plan>"
 ```
 
-After all tasks are created, wire dependencies:
+**Flag rationale (verified against `bd create --help`):**
+- Positional title, `--type=task` (default) and `--priority=2` (default) omitted — drop defaults for brevity.
+- `--parent=<epic-id>` establishes the epic→task hierarchical dep. This is the canonical way to tie a task to its epic. Do NOT stuff the epic ID into `--notes` — use `--parent`.
+- `--skills="superpowers:subagent-driven-development"` enforces that whoever picks up the task invokes that skill. The flag is a single-string field; if the task needs multiple skills, confirm the delimiter convention in your beads config before stuffing more than one value in.
+- Plan-path traceability lives on the **epic's** `--description` (Step 4), not on each task — tasks inherit traceability via `--parent`.
+
+After all tasks are created, wire inter-task dependencies. `bd dep add <A> <B>` means **A depends on B** (A is blocked by B):
 ```bash
-bd dep add <downstream-task> <upstream-task>
+bd dep add <downstream-task> <upstream-task>                     # default type: blocks
+bd dep add <downstream-task> <upstream-task> --type=<dep-type>   # semantic type
 ```
+
+**Three ways to wire deps — pick by shape of the graph:**
+
+| Situation | Mechanism |
+|-----------|-----------|
+| Linear or few, simple deps | `bd dep add <downstream> <upstream>` post-hoc, one per edge |
+| Known at creation, per-task | `--deps "id1,id2"` or `--deps "blocks:id1,discovered-from:id2"` on `bd create` |
+| Complex dep graph across many tasks (fan-in, fan-out, dep chains) | Write a JSON plan file and pass it with `bd create --graph=<plan.json>` — creates all issues and edges in one pass |
+
+For plans with non-trivial task graphs (5+ tasks, interleaved deps), prefer `--graph`: one JSON, one command, no risk of partially-wired state between `bd create` and `bd dep add`.
+
+**Dep types (from `bd dep add --help`):** `blocks` (default), `tracks`, `related`, `parent-child`, `discovered-from`, `until`, `caused-by`, `validates`, `relates-to`, `supersedes`. Pick the one that actually describes the relationship — `blocks` is the default but not always the right semantic (e.g., fast-follows are usually `discovered-from`, not `blocks`).
 
 ### Step 6: Update Plan File (CRITICAL)
 
@@ -114,7 +130,12 @@ Add a `## Pipeline Tracking` section immediately after the plan's title/header b
 | Task 1: <title> | <task-id> | open |
 | Task 2: <title> | <task-id> | open |
 | ... | ... | ... |
+
+**Follow-ups filed during execution (not blocking):**
+- (none yet)
 ```
+
+The **Follow-ups** list starts empty. During Phase 2, Step 5a appends entries here as review findings are filed as fast-follow beads tasks.
 
 Commit the update:
 ```bash
@@ -130,12 +151,14 @@ This is the core development loop. Repeat until no open tasks remain.
 
 ### Step 1: Check Ready Tasks
 
+Scope queries to this plan's epic so unrelated tasks don't leak into the loop:
+
 ```bash
-bd ready
+bd ready --parent=<epic-id>
 ```
 
 - **Ready tasks exist:** Continue to Step 2.
-- **No ready tasks, but open tasks exist:** Everything is blocked. Run `bd blocked` to show what's stuck. Report to the user and stop.
+- **No ready tasks, but open tasks exist:** Everything is blocked. Run `bd blocked --parent=<epic-id>` to show what's stuck. Report to the user and stop.
 - **No open tasks remain:** Skip to Phase 3 (Complete).
 
 ### Step 2: Create Worktree (First Pass Only)
@@ -183,19 +206,70 @@ After implementation, invoke **superpowers:requesting-code-review** to review ag
 
 - **Review scope:** All changes from this execution pass.
 - **Review against:** The plan's spec file (if one exists) and the task sections just implemented.
-- Fix any issues the review identifies.
+- Collect every finding the review surfaces — do not silently drop any.
+- Fix in-scope issues inline (see Step 5a for the triage rule).
 - Re-run tests after fixes.
+
+### Step 5a: File Fast-Follow Tasks from Review Findings (CRITICAL)
+
+Every review finding is either **fixed inline** in this pass or **filed as a fast-follow beads task**. Nothing is left as a TODO comment, a chat note, or a "we'll remember it" item.
+
+**Triage rule:**
+
+| Finding looks like... | Action |
+|-----------------------|--------|
+| Mechanical fix in code just written (typo, missing import, obvious one-liner) within the task's scope | **Inline fix** — apply in this pass, no task |
+| Out of scope of the current task (touches other files, other subsystems) | **Fast-follow** |
+| Pre-existing issue surfaced by this task (e.g., a brittle test, a latent race) | **Fast-follow** |
+| Reveals a spec ambiguity or design question | **Fast-follow** (do not guess an answer under pressure) |
+| Non-trivial refactor, architectural hygiene, or perf concern | **Fast-follow** |
+
+When in doubt, file a fast-follow. Traceability beats speed.
+
+**Dep convention.** Task deps in this pipeline are always either **epic-to-task** (`--parent=<epic-id>` at creation) or **inter-task** (`bd dep add <downstream> <upstream>`, or `--deps` at creation, or a whole-graph JSON via `--graph`). `--notes` is free-text metadata and is NOT a dep mechanism — never use it to wire hierarchy.
+
+**For each fast-follow finding:**
+
+1. Create the task in one command — hierarchy, skill, provenance, and priority all on `bd create`:
+   ```bash
+   bd create "<concise finding summary>" \
+     --parent=<epic-id> \
+     --skills="superpowers:subagent-driven-development" \
+     --deps="discovered-from:<original-task-id>" \
+     --priority=3 \
+     --description="<what was found, why it matters, where it was surfaced (task N / file / line)>"
+   ```
+   Save the new task ID. `discovered-from` captures provenance without blocking — the fast-follow lands on `bd ready` immediately.
+
+2. If the fast-follow has a genuine ordering constraint — e.g., it must NOT start until the originating task closes — add a `blocks`-type dep:
+   ```bash
+   bd dep add <fast-follow-id> <upstream-task-id> --type=blocks
+   ```
+   Most fast-follows don't need this.
+
+3. Append a row to the **Follow-ups filed during execution (not blocking)** list in the plan's Pipeline Tracking section:
+   ```markdown
+   - <fast-follow-id> — <concise description matching the bd title>
+   ```
+
+**Non-blocking by design.** Fast-follows do NOT gate epic closure. Phase 3 closes the epic when all originally-planned tasks close; open fast-follows remain on the `bd ready` queue for subsequent work. They are executed as fast-follow items in the next dev-loop iteration, or picked up by a later `bd ready` pass.
+
+**Forbidden shortcuts:**
+- "I'll just leave a `// TODO` and skip the task." No — file the task.
+- "It's small, I can remember it." No — file the task.
+- "I'll batch these findings at the end." No — file each one as it is identified.
 
 ### Step 6: Close Tasks and Update Plan (CRITICAL)
 
-Close completed tasks:
+Close the originally-planned tasks completed in this pass (not the fast-follows — those remain open). `--suggest-next` prints newly-unblocked work, which feeds directly into Step 7:
 ```bash
-bd close <id1> <id2> ...
+bd close --suggest-next <id1> <id2> ...
 ```
 
-Update the Pipeline Tracking table in the plan file:
+Update the Pipeline Tracking section in the plan file:
 - `open` -> `closed` for completed tasks
 - Update any in-progress markers
+- Confirm every fast-follow filed in Step 5a appears in the **Follow-ups** list
 
 Commit everything:
 ```bash
@@ -205,7 +279,7 @@ git commit -m "<descriptive-commit-message>"
 
 ### Step 7: Loop
 
-Return to Step 1. Check what's newly unblocked and continue.
+Return to Step 1. The `--suggest-next` output from Step 6 shows what's newly unblocked. Fast-follows filed in Step 5a will surface in `bd ready --parent=<epic-id>` and should be picked up as fast-follow items in this same session before Phase 3, unless the user scopes them to a later run.
 
 ---
 
@@ -213,14 +287,20 @@ Return to Step 1. Check what's newly unblocked and continue.
 
 ### Step 1: Final Verification
 
-- All beads tasks for this epic are closed
+Check the epic's completion state:
+```bash
+bd epic status <epic-id>
+```
+
+- All **originally-planned** beads tasks for this epic are closed
+- Fast-follow tasks (from Step 5a) may still be open — that is expected and does not block completion
 - All tests pass
 - Build is clean
 - No uncommitted changes
 
 ### Step 2: Update Plan File (CRITICAL)
 
-Update the Pipeline Tracking section to reflect completion:
+Update the Pipeline Tracking section to reflect completion. Keep the Follow-ups list intact with any still-open fast-follows so the plan remains the canonical record of what spilled out of execution:
 
 ```markdown
 ## Pipeline Tracking
@@ -237,13 +317,19 @@ Update the Pipeline Tracking section to reflect completion:
 | Task 1: <title> | <task-id> | closed |
 | Task 2: <title> | <task-id> | closed |
 | ... | ... | ... |
+
+**Follow-ups filed during execution (not blocking):**
+- <fast-follow-id> — <description>
+- <fast-follow-id> — <description>
 ```
 
 ### Step 3: Close Epic
 
 ```bash
-bd close <epic-id> --reason="All plan tasks complete"
+bd close <epic-id> --reason="All plan tasks complete; N fast-follows tracked separately"
 ```
+
+Open fast-follow tasks remain on the `bd ready` queue and do not need to close for the epic to close.
 
 ### Step 4: Finish Branch
 
@@ -262,6 +348,7 @@ This skill orchestrates these superpowers skills in order:
 | Phase 2, Step 4 | `superpowers:subagent-driven-development` | Parallel task implementation |
 | Phase 2, Step 4 (per task) | `superpowers:test-driven-development` | TDD when plan requires it |
 | Phase 2, Step 5 | `superpowers:requesting-code-review` | Review against spec |
+| Phase 2, Step 5a | (inline — no skill) | File fast-follow beads tasks from review findings |
 | Phase 3, Step 4 | `superpowers:finishing-a-development-branch` | Merge/PR/keep decision |
 
 ## Common Mistakes
@@ -273,6 +360,15 @@ This skill orchestrates these superpowers skills in order:
 | Summarizing task descriptions too aggressively | Copy implementation detail faithfully from the plan |
 | Starting implementation before claiming | Always `bd update --claim` first |
 | Skipping review for "small" changes | Always review against spec |
+| Dropping review findings into TODO comments or memory | Every non-inline finding becomes a beads fast-follow in Step 5a |
+| Using `--notes="Epic: ..."` for hierarchy | Hierarchy is `--parent=<epic-id>`; notes is free-text metadata only |
+| Using `bd dep add` to wire a task against the epic | Epic relationship is `--parent=<epic-id>` at creation; `bd dep add` is for inter-task deps only |
+| Filing a fast-follow without `--parent=<epic-id>` | Without it, the task is orphaned from the epic and will not show up under it |
+| Tasks missing `--skills="superpowers:subagent-driven-development"` | Tag every code task with the enforcement skill at creation so the pickup agent invokes it |
+| Hand-wiring a complex dep graph one `bd dep add` at a time | For 5+ tasks with non-trivial deps, write a JSON and use `bd create --graph=<plan.json>` — atomic, no partial-wire state |
+| Fast-follows missing from the Follow-ups list in the plan | Append `- <bd-id> — <desc>` in the same commit as Step 6 |
+| Blocking epic closure on open fast-follows | Fast-follows are non-blocking by design — close the epic when planned tasks close |
+| Batching fast-follow filing at end of session | File each one as the review identifies it, not later |
 | Forgetting plan file update on completion | Plan must show `complete` status with date |
 | Working on blocked tasks | Only work `bd ready` tasks — check every loop iteration |
 | Mixing plans in one worktree | One plan per worktree, always |
