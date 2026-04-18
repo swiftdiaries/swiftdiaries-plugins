@@ -172,18 +172,30 @@ On the first execution pass, decide whether to use a worktree:
 
 Update the Pipeline Tracking `Worktree` field with the path and branch.
 
-### Step 3: Claim and Group Tasks
+### Step 3: Claim and Group Tasks (CRITICAL — Parallelism is the Default)
 
 Claim all ready tasks:
 ```bash
 bd update <id> --claim
 ```
 
-**Group for parallelism:** Tasks that don't share files can run in parallel. Tasks that modify the same files must be sequential.
+**Build the parallel group — this is a required action, not an optional optimization.** For every pair of ready tasks, inspect the **files modified** list in their plan sections. Two tasks are **parallel-safe** iff their file sets are disjoint. Group all parallel-safe tasks together; tasks with file overlap form serial chains.
 
-### Step 4: Implement
+**Minimum output of this step:** a concrete grouping, e.g.
+- Parallel group 1: `{task-A, task-B, task-C}` (no file overlap)
+- Serial chain: `task-D -> task-E` (both touch `foo/bar.py`)
 
-Invoke **superpowers:subagent-driven-development** to implement the task group. Each subagent receives:
+You MUST produce this grouping before Step 4. Do not proceed with "I'll figure it out as I go."
+
+**Reconciling with `superpowers:subagent-driven-development`:** That skill's red flag *"Never dispatch multiple implementation subagents in parallel (conflicts)"* is about file conflicts between implementers. The file-overlap check you just performed **is** the conflict check — parallel-safe groups by construction have no conflicts. This skill explicitly overrides that red flag **for file-disjoint groups only**. File-overlapping tasks still run serially.
+
+### Step 4: Implement (Dispatch the Whole Group in One Message)
+
+Invoke **superpowers:subagent-driven-development** to implement. Do not read this as "consider invoking" — the invocation is mandatory. Do **NOT** implement tasks yourself in the main thread; every task goes through a subagent.
+
+**Parallel dispatch rule:** For each parallel group from Step 3, dispatch all implementers **in a single message containing multiple Agent tool calls** (per the system prompt's "multiple tool calls in parallel" guidance). Serial chains are dispatched one task at a time, waiting for each to close before the next. Never dispatch a parallel group sequentially across multiple messages — that defeats the grouping work and wastes wall-clock time.
+
+Each subagent receives:
 
 1. **The task's plan section** — read from the plan file, not just the beads description. The plan has the full implementation detail (code snippets, exact file locations, step-by-step instructions).
 
@@ -373,3 +385,6 @@ This skill orchestrates these superpowers skills in order:
 | Working on blocked tasks | Only work `bd ready` tasks — check every loop iteration |
 | Mixing plans in one worktree | One plan per worktree, always |
 | Using non-opus model for subagents | Always `model: "opus"` |
+| Implementing a task yourself in the main thread because "it's small" | Every task is dispatched to a subagent via `superpowers:subagent-driven-development`. No exceptions. |
+| Dispatching file-disjoint tasks serially (one message per subagent) | File-disjoint tasks are a parallel group — dispatch them in a single message with multiple Agent tool calls. |
+| Skipping the explicit file-overlap grouping step | Step 3 of Phase 2 is mandatory output. You must produce the parallel groups and serial chains before Step 4. |
